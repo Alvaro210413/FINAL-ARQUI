@@ -113,3 +113,5 @@ fase de descarga, ya que permite solapar múltiples esperas de red en paralelo e
 
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+- Hilos “a mano”: medición y limitaciones:
+
