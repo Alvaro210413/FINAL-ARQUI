@@ -1,0 +1,115 @@
+
+- Naturaleza del Workload:
+Un workload describe el tipo de trabajo que realiza un programa y qué parte de ese trabajo *determina su tiempo total de ejecución*. 
+En términos generales, un programa puede ser I/O-bound, CPU-bound o mixto, dependiendo de si el tiempo se consume principalmente esperando 
+operaciones externas (como descargas o lectura de archivos) o realizando cálculos dentro del procesador.
+
+Un programa I/O-bound es aquel cuyo *rendimiento está limitado por operaciones de entrada/salida*, como solicitudes a internet, acceso a discos, 
+lectura de archivos o consultas a bases de datos. En estos casos, la CPU pasa mucho tiempo inactiva, “esperando” que llegue la información. 
+Por ejemplo, al descargar varias páginas web, la red es miles de veces más lenta que la CPU; aunque el procesador sea rápido, el programa estará 
+detenido esperando las respuestas del servidor. Por eso, ese tipo de tareas se consideran I/O-bound.
+
+Por otro lado, un programa CPU-bound *está limitado por el procesamiento interno*. Este tipo de programas pasan la mayor parte del tiempo ejecutando 
+cálculos intensivos, como análisis numérico, criptografía, procesamiento de imágenes o algoritmos complejos. En estos casos, el cuello de botella 
+es la potencia del procesador, no la velocidad de la red. Un ejemplo típico sería calcular los números primos hasta diez millones: no depende de 
+la red ni del disco, solo del CPU.
+
+Sin embargo, muchos programas son mixtos porque combinan fases I/O y CPU. No obstante, incluso en casos mixtos, el workload dominante es la parte 
+que consume más tiempo. Por ejemplo, si un programa descarga un archivo (I/O) y luego realiza un pequeño procesamiento (CPU), pero la descarga 
+toma 1 segundo y el análisis solo 5 milisegundos, el tiempo total sigue estando determinado por el I/O.
+
+-- talk about the example --
+
+En la práctica de esta tarea, el script html_fetch_sync.py es un ejemplo claro de workload mixto. Este programa realiza dos tipos de trabajo: primero 
+descarga páginas web usando requests.get(), lo cual corresponde a una fase I/O-bound; luego analiza esas páginas con BeautifulSoup, aplica expresiones 
+regulares para extraer palabras y usa Counter para contarlas, lo que corresponde a una fase CPU-bound. Sin embargo, en comparación, la descarga de HTML 
+toma ampliamente más tiempo que su procesamiento. El parsing, la tokenización y el conteo son operaciones rápidas que la CPU ejecuta en pocos milisegundos, 
+mientras que la descarga depende de la velocidad de la red y normalmente es mucho más lenta.
+
+Por esta razón, aunque el programa realiza tareas CPU, el tiempo total de ejecución está dominado por las operaciones de red, lo que significa que el 
+workload del script es principalmente I/O-bound, con componentes CPU-bound secundarios. Dicho de forma simple: el programa pasa más tiempo esperando que procesando.
+
+Un ejemplo cotidiano sería pedir una pizza (descargar HTML) y luego cortarla en pedazos (procesar el HTML). El tiempo final no depende de cuánto tardas en cortarla, 
+sino del tiempo que esperas a que llegue el delivery. Exactamente lo mismo ocurre aquí: la descarga domina el tiempo total.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+SYNC:
+En un programa síncrono (sync) cada operación se ejecuta de forma secuencial y bloqueante: el programa no puede avanzar hasta que la instrucción actual termine 
+completamente. En el contexto de esta práctica, esto significa que el script descarga una URL, espera a que termine, luego recién pasa a la siguiente, 
+y así sucesivamente. Por esa razón, si la descarga de una sola página tarda un segundo, y hay veinte URLs, el tiempo total será cercano a veinte segundos o más. 
+El desempeño depende totalmente de la latencia externa, convirtiendo este patrón en algo naturalmente lento cuando se trabaja con red.
+
+ASYNC:
+Por otro lado, asyncio permite escribir programas asíncronos, donde muchas operaciones I/O pueden ejecutarse de forma concurrente dentro de un solo hilo. La clave 
+es que las funciones asíncronas no bloquean el programa completo, sino que “ceden el control” mientras esperan la respuesta de la red. Así, mientras una URL está 
+esperando su HTML, el programa puede solicitar otra, procesar otra, o continuar tareas pendientes. Esto no acelera la red, pero sí permite aprovechar el tiempo 
+muerto que el modelo síncrono desperdicia, logrando un rendimiento mucho mejor en workloads I/O-bound.
+
+Un ejemplo simple: en sync, si cada descarga tarda 1 segundo, 10 descargas toman unos 10 segundos. En asyncio, como todas pueden esperarse en paralelo, las mismas 
+10 descargas pueden completarse en poco más de 1 segundo. La CPU no trabaja más rápido, simplemente no queda “esperando sin hacer nada”. Por eso, asyncio es ideal 
+para miles de descargas, solicitudes HTTP, consultas a bases de datos o cualquier tarea dominada por latencia.
+
+En resumen: la versión síncrona es lenta porque espera bloqueada, una URL a la vez; la versión asyncio es mucho más eficiente porque solapa las esperas, permitiendo 
+que muchas descargas ocurran simultáneamente. Este beneficio es especialmente notable en programas I/O-bound como este proyecto, donde el cuello de botella es la red y no la CPU.
+
+SYNC:
+[SYNC] Tiempo total: 88.73 s
+[SYNC] Top-50 términos globales guardados en results_sync.json
+[SYNC] Tiempo total: 78.857962 s
+[SYNC] Top-50 términos globales guardados en results_sync.json
+[SYNC] Tiempo total: 83.97 s
+[SYNC] Top-50 términos globales guardados en results_sync.json
+
+Indique si el programa secuencial resulta ser principalmente I/O-bound, CPU-bound o mixto, y explique por qué.  
+
+Al ejecutar html_fetch_sync.py obtuve tiempos totales de 88.73 s, 78.857962 s y 78.85 s, lo cual muestra que la mayor parte de la ejecución se dedica a esperar las 
+descargas de cada página web. El procesamiento local (parsing, tokenización y conteo de palabras) es muy rápido en comparación, mientras que las solicitudes de red 
+presentan una latencia mucho mayor. Por ello, aunque el programa incluye una pequeña parte CPU-bound, el tiempo total está claramente dominado por las operaciones de red, 
+concluyendo que el script secuencial es principalmente I/O-bound.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- Modifique html_fetch_sync.py para cronometrar por separado la fase de
+  descarga y la de análisis de cada página.
+
+Informe los tiempos promedio de descarga y de parsing, y comente qué fase
+domina el tiempo total.
+Ejecución 1:
+Promedio de descarga: 0.732660 s
+Promedio de parsing: 0.027001 s
+Ejecución 2:
+Promedio de descarga: 0.524730 s
+Promedio de parsing: 0.022671 s
+Ejecución 3:
+Promedio de descarga: 0.543196 s
+Promedio de parsing: 0.028506 s
+
+Tras medir por separado la fase de descarga y la fase de análisis dentro de html_fetch_sync.py, se obtuvo un tiempo promedio de descarga entre 0.52 s y 0.73 s por URL,
+mientras que el parsing promedió solo 0.022 s a 0.028 s. Esto significa que la descarga es aproximadamente 25 veces más lenta que el procesamiento local del HTML. 
+Por lo tanto, el tiempo total de ejecución está claramente dominado por la fase de I/O de red, ya que la CPU solo interviene unos pocos milisegundos por página. 
+En consecuencia, la descarga es la etapa que determina el rendimiento global del programa.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- AsyncIO: rendimiento y análisis de mejora
+
+[ASYNC] Tiempo total: 29.52 s
+[ASYNC] Top 50 palabras globales escritas en html_results_async.json
+[ASYNC] Tiempo total: 20.14 s
+[ASYNC] Top 50 palabras globales escritas en html_results_async.json
+[ASYNC] Tiempo total: 19.65 s
+[ASYNC] Top 50 palabras globales escritas en html_results_async.json
+
+El speedup mide cuánto más rápido es un método respecto a otro.
+
+La fórmula es:
+Speedup = Tiempo_sync / Tiempo_async
+
+Speedup = 84.53 / 23.10
+        ≈ 3.65×
+Esto significa que asyncio fue 3.6 veces más rápido que el modo síncrono.
+
+Al ejecutar html_fetch_async.py, los tiempos obtenidos fueron 29.52 s, 20.14 s y 19.65 s, con un promedio aproximado de 23.10 s. Comparando este valor con el promedio 
+del modo síncrono (≈84.53 s), se obtiene un speedup de 84.53 / 23.10 ≈ 3.65×. Esto significa que la versión asíncrona es más de tres veces más rápida que la secuencial. 
+A partir de la instrumentación previa, se observa que la fase de parsing dura solo unos milisegundos, por lo que el mayor beneficio de AsyncIO se da claramente en la 
+fase de descarga, ya que permite solapar múltiples esperas de red en paralelo en lugar de bloquearse una URL a la vez.
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
