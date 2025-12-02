@@ -397,3 +397,155 @@ A partir de ese valor, agregar más workers deja de reducir el tiempo e incluso 
 es decir, la competencia entre workers por recursos limitados como la red, el GIL durante el parsing, la cola del pool y la CPU. 
 Cuando aumenta la contención, los workers pasan más tiempo bloqueados o esperando turnos, por lo que el rendimiento deja de 
 escalar y la memoria consumida aumenta innecesariamente.
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+OPERACIONES.C:
+Lo que se espera en C (sin GIL):
+  Los hilos sí pueden correr en paralelo en CPU-bound.
+  Los procesos también, pero tienen más overhead.
+  El speedup máximo está limitado por la cantidad de núcleos.
+
+   CPU BOUND vs WORKERS
+  Técnica	                    Debería pasar en C	                                                                              ¿Ocurre en tu gráfica?
+  Threading (Hilos)	          Debería mejorar al inicio, pero estabilizarse cuando ya no hay más núcleos disponibles	        ✔️ Sí: baja de 6 s a ~3.0 s y se mantiene ahí sin mejorar más
+  Multiprocessing (Procesos)	Debería mejorar igual o un poco más que los hilos (por aislamiento), hasta el límite de núcleos	✔️ Sí: también baja a ~3.0–3.5 s pero con más picos
+  Muchos workers (>8)	        Empeora por overhead, cambios de contexto y contención	                                        ✔️ Sí: aparecen picos irregulares a partir de ~10 workers
+   
+   I/O BOUND vs WORKERS
+  Técnica	                    Debería pasar en C	                                            ¿Ocurre en tu gráfica?
+  Threading (Hilos)	          Debería ser muy rápido y estable, mejor que secuencial	     ✔️ Sí: se mantiene en 0.025–0.04 s, siempre más rápido que 0.071 s secuencial
+  Multiprocessing (Procesos)	No debería mejorar, e incluso podría empeorar por overhead	 ✔️ Sí: es peor que hilos e incluso peor que secuencial en varios puntos
+  Muchos workers (>8)	        Debería empeorar por contención de disco y procesos pesados	 ✔️ Sí: hay picos fuertes en varios puntos de 0.06–0.09 s
+
+En CPU-bound, hilos y procesos mejoran el rendimiento al inicio, pero la ganancia se detiene al saturar los núcleos 
+y aparece overhead, siendo los procesos más irregulares por su mayor costo.
+
+En I/O-bound, los hilos son claramente superiores porque pueden avanzar mientras esperan al disco, mientras que los 
+procesos solo añaden overhead y resultan incluso más lentos que el modo secuencial.
+
+OPERACIONES.PY:
+   CPU BOUND vs WORKERS
+  Técnica	                    Debería pasar	                                      ¿Ocurre en tu gráfica?
+  Threading (Hilos)	          No mejora mucho o incluso empeora, por el GIL	   ✔️ Sí: se queda pegado alrededor de 1.5–2.0 s y tiene picos feos
+  Multiprocessing (Procesos)	Debe acelerar, hasta cierto punto	               ✔️ Sí: baja hasta ~0.8–1.0 s con 3–6 workers
+  Muchos procesos (>8)	      Debe empeorar por overhead y contención	         ✔️ Sí: desde 10 hacia adelante empieza a subir
+
+   I/O BOUND vs WORKERS
+  Lo que se espera en una carga I/O-bound:
+  Técnica	                    Debería pasar	                                                               ¿Ocurre en tu gráfica?
+  Threading (hilos)	          Debe ganar ampliamente porque puede cambiar de tarea mientras espera I/O	✔️ Sí: se mantiene ~0.24–0.28 s
+  Multiprocessing	            No debe mejorar → overhead innecesario	                                  ✔️ Sí: sube hasta 1.0 s, o sea es PEOR que secuencial
+
+En CPU-bound, multiprocessing logra mejor rendimiento porque cada proceso ejecuta en un core distinto y evita el GIL. 
+Threading no mejora y puede empeorar debido a contención del GIL.
+
+En I/O-bound, threading es ampliamente superior porque los hilos pueden avanzar mientras otros esperan el disco. 
+Multiprocessing introduce alto overhead y no aporta beneficio, resultando incluso peor que el modo secuencial.
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+¿Qué es el overhead? 
+
+El overhead es el costo extra que aparece cuando intentas paralelizar o concurrenciar un programa.
+No es trabajo “útil”, sino trabajo adicional que NO existiría en una ejecución secuencial, como:
+
+- crear hilos o procesos
+- copiar memoria (procesos)
+- comunicación entre workers
+- sincronización
+- cambio de contexto (context switching)
+- administración interna del SO
+
+En pocas palabras:
+    Overhead = tiempo perdido por coordinar la paralelización.
+    No hace el trabajo, solo administra el trabajo.
+
+Cuando el overhead es mayor que la ganancia, el programa se vuelve más lento.
+
+EJEMPLO:
+=== CPU BOUND ===                                                       === I/O BOUND ===
+Tiempo de ejecución secuencial: 1.634889                                I/O secuencial: 0.284061
+Tiempo de ejecución concurrente con 2 hilos: 1.550625                   I/O concurrente con 2 hilos: 0.244102
+Tiempo de ejecución concurrente con 3 hilos: 1.593165                   I/O concurrente con 3 hilos: 0.261416
+Tiempo de ejecución concurrente con 4 hilos: 1.571420                   I/O concurrente con 4 hilos: 0.280523
+Tiempo de ejecución concurrente con 5 hilos: 1.603957                   I/O concurrente con 5 hilos: 0.271541   
+Tiempo de ejecución concurrente con 6 hilos: 1.734278                   I/O concurrente con 6 hilos: 0.302944
+Tiempo de ejecución concurrente con 7 hilos: 1.788568                   I/O concurrente con 7 hilos: 0.329759
+Tiempo de ejecución concurrente con 8 hilos: 1.711800                   I/O concurrente con 8 hilos: 0.363895
+Tiempo de ejecución concurrente con 9 hilos: 1.645342                   I/O concurrente con 9 hilos: 0.261269
+Tiempo de ejecución concurrente con 10 hilos: 1.727296                  I/O concurrente con 10 hilos: 0.259300
+Tiempo de ejecución concurrente con 11 hilos: 1.710168                  I/O concurrente con 11 hilos: 0.258988
+Tiempo de ejecución concurrente con 12 hilos: 1.633236                  I/O concurrente con 12 hilos: 0.292595
+Tiempo de ejecución concurrente con 13 hilos: 1.740746                  I/O concurrente con 13 hilos: 0.287716
+Tiempo de ejecución concurrente con 14 hilos: 1.715659                  I/O concurrente con 14 hilos: 0.302804
+Tiempo de ejecución concurrente con 15 hilos: 1.748673                  I/O concurrente con 15 hilos: 0.309957
+Tiempo de ejecución concurrente con 16 hilos: 1.889665                  I/O concurrente con 16 hilos: 0.295531
+Tiempo de ejecución concurrente con 17 hilos: 1.639583                  I/O concurrente con 17 hilos: 0.305398
+Tiempo de ejecución concurrente con 18 hilos: 1.717307                  I/O concurrente con 18 hilos: 0.293670
+Tiempo de ejecución concurrente con 19 hilos: 1.596196                  I/O concurrente con 19 hilos: 0.293901
+Tiempo de ejecución paralela con 2 procesos: 1.083883                   I/O paralela con 2 procesos: 0.315975
+Tiempo de ejecución paralela con 3 procesos: 0.955549                   I/O paralela con 3 procesos: 0.305282
+Tiempo de ejecución paralela con 4 procesos: 1.104379                   ...
+Tiempo de ejecución paralela con 5 procesos: 1.046830                   I/O paralela con 5 procesos: 0.416544
+Tiempo de ejecución paralela con 6 procesos: 1.138204                   I/O paralela con 6 procesos: 0.478920
+Tiempo de ejecución paralela con 7 procesos: 1.250429                   I/O paralela con 7 procesos: 0.483203
+Tiempo de ejecución paralela con 8 procesos: 1.287919                   I/O paralela con 8 procesos: 0.586520
+Tiempo de ejecución paralela con 9 procesos: 1.263757                   I/O paralela con 9 procesos: 0.666404
+Tiempo de ejecución paralela con 10 procesos: 1.349247                  I/O paralela con 10 procesos: 0.758487
+Tiempo de ejecución paralela con 11 procesos: 1.430543                  I/O paralela con 11 procesos: 0.772215
+Tiempo de ejecución paralela con 12 procesos: 1.720765                  I/O paralela con 12 procesos: 0.838149
+Tiempo de ejecución paralela con 13 procesos: 1.573000                  I/O paralela con 13 procesos: 0.771687
+Tiempo de ejecución paralela con 14 procesos: 1.540869                  I/O paralela con 14 procesos: 1.261161
+Tiempo de ejecución paralela con 15 procesos: 1.618951                  I/O paralela con 15 procesos: 1.041900
+Tiempo de ejecución paralela con 16 procesos: 1.624018                  I/O paralela con 16 procesos: 1.216580
+Tiempo de ejecución paralela con 17 procesos: 1.868275                  I/O paralela con 17 procesos: 1.103399
+Tiempo de ejecución paralela con 18 procesos: 1.721691                  I/O paralela con 18 procesos: 1.284024
+Tiempo de ejecución paralela con 19 procesos: 1.955831                  I/O paralela con 19 procesos: 1.442757
+
+¿Dónde se ve el overhead en tus resultados?
+
+Cuando agregas más hilos/procesos y el tiempo sube en vez de bajar, eso es overhead tragándose todas las ganancias.
+
+🟢 Ejemplo claro en tu CPU-bound:
+Secuencial: 1.63 s
+Procesos: (mejor caso) 0.81 – 1.04 s
+Pero luego:
+
+12 procesos → 1.17 s
+16 procesos → 1.34 s
+19 procesos → 1.46 s
+
+Ahí ya no mejoras: el SO está gastando más tiempo creando, cambiando, sincronizando y coordinando procesos que haciendo trabajo real.
+
+Eso es overhead de procesos.
+En el caso de hilos (threading) en CPU-bound:
+
+Tus tiempos casi no cambian:
+   1.63 s secuencial
+   1.55–1.70 s con hilos
+
+Eso te muestra claramente el GIL: todos los hilos compiten por un único núcleo lógico,
+y lo único que aumenta es el overhead de cambiar entre hilos.
+
+🟢 En I/O-bound, el overhead se ve más claro en multiprocessing:
+
+Secuencial: 0.24 s
+8 procesos: 0.49 s
+12 procesos: 0.59 s
+16 procesos: 0.83 s
+19 procesos: 0.96 s
+
+→ No solo NO mejora, se vuelve más del triple de lento.
+Porque multiprocessing NO sirve para I/O, los procesos pasan su vida esperando el disco, pero igual se paga el costo extra de crearlos, 
+sincronizarlos y cambiar entre ellos.
+Eso es overhead puro.
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+¿Qué significa el SPEEDUP que te generó tu benchmark?
+El speedup se define como:
+  S = T_secuencial / T_paralelo
+
+Interpretación simple:
+  S = 1.0 → no ganaste nada
+  S > 1.0 → el programa es más rápido
+  S < 1.0 → paralelizar lo empeoró (mucho overhead)
+
