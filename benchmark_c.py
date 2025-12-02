@@ -5,6 +5,9 @@ import matplotlib.pyplot as plt
 def run_operaciones():
     print("Iniciando ejecución de ./operaciones...")
     result = subprocess.run(["./operaciones"], capture_output=True, text=True, check=True)
+    # Si el que se va a leer es un archivo.py:
+    # result = subprocess.run(["python3", "operaciones.py"], capture_output=True, text=True, check=True)
+
     print("Ejecución finalizada.")
     return result.stdout
 
