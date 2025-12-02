@@ -549,3 +549,41 @@ Interpretación simple:
   S > 1.0 → el programa es más rápido
   S < 1.0 → paralelizar lo empeoró (mucho overhead)
 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+RACE CONDITION:
+ 1) ¿Por qué las dos versiones producen distintos valores de likes?
+
+La versión sin locks permite que varios hilos modifiquen la variable likes al mismo tiempo, creando condiciones de carrera. 
+Como cada hilo lee un valor desactualizado y luego lo sobrescribe, muchos incrementos se pierden. En cambio, la versión con
+lock protege la sección crítica y garantiza que cada incremento se realice correctamente.
+
+ 2) ¿Qué ocurriría si no hubiese sleep(0.000001)?
+
+El problema seguiría existiendo, pero sería mucho menos visible. Al no haber retardo, las operaciones ocurren tan rápido que 
+las pérdidas de incrementos son menos frecuentes y puede parecer que el programa “funciona”, aunque internamente las race 
+conditions siguen ahí.
+
+ 3) ¿Desaparecería el problema sin el sleep?
+
+No. El sleep no causa el error; solo lo hace más evidente. Incluso sin retardo, la falta de exclusión mutua genera condiciones 
+de carrera y resultados incorrectos, aunque a veces más difíciles de detectar.
+
+ 4) ¿Qué versión toma más tiempo y por qué?
+
+La versión con locks toma más tiempo porque cada hilo debe esperar a que los demás liberen el lock antes de poder incrementar 
+el contador. Esto crea contención y reduce el paralelismo, pero garantiza que el resultado sea correcto.
+
+Definición simple de Lock (corta)
+
+Un lock es un mecanismo que permite que solo un hilo a la vez ejecute una sección crítica del código.
+Sirve para evitar race conditions, asegurando que las operaciones sensibles (como modificar un saldo o contador) se hagan de forma segura, ordenada y coherente.
+
+Sin Lock:
+Aparecen race conditions: varios hilos leen el saldo antes de que otros lo actualicen, lo que produce pagos duplicados, 
+saldos imposibles y hasta números negativos. El programa termina rápido porque casi no hay sincronización.
+
+Con Lock:
+La empresa solo paga si realmente tiene saldo suficiente. El resultado es coherente y el saldo nunca se vuelve negativo. 
+Sin embargo, el tiempo total aumenta porque cada pago es exclusivo y los hilos deben esperar su turno.
+
+
