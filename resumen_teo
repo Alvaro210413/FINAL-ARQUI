@@ -111,7 +111,289 @@ del modo síncrono (≈84.53 s), se obtiene un speedup de 84.53 / 23.10 ≈ 3.65
 A partir de la instrumentación previa, se observa que la fase de parsing dura solo unos milisegundos, por lo que el mayor beneficio de AsyncIO se da claramente en la 
 fase de descarga, ya que permite solapar múltiples esperas de red en paralelo en lugar de bloquearse una URL a la vez.
 
+
+- A partir de la instrumentación previa, determine en qué fase (descarga o
+  parsing) obtiene mayor beneficio el modelo asyncio.
+
+Ejecución 1:
+Tiempo total de descargas (async): 9.7220 s
+Tiempo total de parsing   (async): 1.9262 s
+Tiempo total del programa (async): 11.6482 s
+Promedio de descarga por URL (async): 0.0680 s
+Promedio de análisis  por URL (async): 0.013470 s
+Ejecución 2:
+Tiempo total de descargas (async): 6.6137 s
+Tiempo total de parsing   (async): 1.9895 s
+Tiempo total del programa (async): 8.6032 s
+Promedio de descarga por URL (async): 0.0462 s
+Promedio de análisis  por URL (async): 0.013913 s
+Ejecución 3:
+Tiempo total de descargas (async): 6.8063 s
+Tiempo total de parsing   (async): 1.8555 s
+Tiempo total del programa (async): 8.6618 s
+Promedio de descarga por URL (async): 0.0476 s
+Promedio de análisis  por URL (async): 0.012975 s
+
+Además del tiempo total, se obtuvieron los promedios por URL dividiendo el tiempo total de descargas y el tiempo total de análisis entre el número de páginas procesadas. 
+De esta manera, el promedio de descarga por URL varió entre 0.05 s y 0.13 s, mientras que el promedio de análisis por URL se mantuvo alrededor de 0.013–0.015 s. 
+Estos valores evidencian que el parsing es muy rápido y que la mejora principal del modelo asíncrono ocurre en la fase de descarga.
+
 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 - Hilos “a mano”: medición y limitaciones:
 
+Hilos:
+[THREAD] Tiempo total: 23.75 s
+[THREAD] Top-50 términos globales guardados en results_thread.json
+[THREAD] Tiempo total: 26.04 s
+[THREAD] Top-50 términos globales guardados en results_thread.json
+[THREAD] Tiempo total: 25.87 s
+[THREAD] Top-50 términos globales guardados en results_thread.json
+
+¿Qué son los hilos (threads) en Python?
+
+Un hilo es una unidad de ejecución que corre dentro del mismo proceso. En teoría, los hilos permiten que un programa ejecute varias tareas “al mismo tiempo”.
+Sin embargo, Python no permite que dos hilos ejecuten código Python en paralelo al mismo tiempo, por una limitación interna llamada GIL (Global Interpreter Lock).
+Por eso, los threads en Python se usan principalmente para I/O-bound, no para CPU.
+
+¿Qué es el GIL (Global Interpreter Lock)?
+
+El GIL es un “candado global” dentro del intérprete de Python (CPython) que solo permite que un hilo ejecute bytecode de Python a la vez.
+
+- Aunque tengas 8 núcleos
+- Aunque crees 100 threads
+- Python solo deja que 1 hilo ejecute código Python al mismo tiempo
+
+Los demás deben esperar su turno para ejecutar operaciones CPU.
+
+¿El GIL bloquea completamente el paralelismo?
+
+No exactamente.
+
+Hay dos casos:
+
+✔ I/O-bound
+Cuando un hilo está esperando la red, disco o un socket, libera el GIL, y otro hilo puede correr.
+Por eso los hilos sí aceleran programas I/O-bound.
+
+Ejemplo: descargas HTTP → sí mejora.
+
+❌ CPU-bound
+Si los hilos están haciendo trabajo de CPU, ninguno puede ejecutarse realmente en paralelo, porque todos necesitan el GIL.
+
+Resultado: NO hay speedup, incluso puede ser más lento.
+
+*****  Speedup = Tiempo_sync / Tiempo_thread
+
+      Entonces:
+        Speedup = 84.53 / 25.22
+                ≈ 3.35×
+
+¿Cómo influye el GIL en el rendimiento observado al usar threading.Thread manual?
+El uso de hilos manuales mejora el rendimiento respecto al modo secuencial porque la descarga de páginas es una operación I/O-bound. Durante las esperas de red, 
+los hilos liberan el GIL, permitiendo que otros hilos avancen y solapen varias descargas. Sin embargo, el parsing del HTML es una operación CPU-bound y, debido 
+al Global Interpreter Lock (GIL), solo un hilo puede ejecutar bytecode de Python a la vez. Esto impide que los hilos aceleren la fase de análisis y limita el 
+speedup total. Como resultado, el modo con threads es más rápido que el modo secuencial, pero menos eficiente que AsyncIO, ya que sigue restringido por el GIL 
+en la parte CPU-bound del programa.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- Procesos “a mano”: aislamiento y overhead:
+
+[PROCESS] Tiempo total: 57.47 s
+[PROCESS] Top-50 términos globales guardados en results_process.json
+[PROCESS] Tiempo total: 68.75 s
+[PROCESS] Top-50 términos globales guardados en results_process.json
+[PROCESS] Tiempo total: 63.36 s
+[PROCESS] Top-50 términos globales guardados en results_process.json
+
+¿Qué es un proceso? (multiprocessing.Process)
+
+Un proceso es una instancia completa del intérprete de Python:
+
+✔ Tiene su propio Python interpreter
+✔ Su propio espacio de memoria
+✔ Su propia copia del código
+✔ No comparte variables con otros procesos
+✔ No está limitado por el GIL
+
+Es decir, cada proceso puede ejecutar código Python en paralelo real en diferentes núcleos.
+
+En contraste con los hilos (threads):
+
+Característica	    Threads        	Procesos
+Memoria	          Compartida	      Aislada
+GIL	               Limita	         No limita
+Ideal para	      I/O-bound	       CPU-bound
+Overhead	          Bajo	         Medio/Alto
+Paralelismo	      No real	           Real
+
+¿Por qué tus tiempos con procesos son tan irregulares?
+Tus resultados:
+63.36 s
+68.75 s
+57.47 s
+
+Esto pasa porque:
+Multiprocessing tiene alto overhead
+   Crear procesos es costoso
+   Copiar funciones, datos, memoria inicial cuesta tiempo
+Los procesos se comunican por pipes/queues
+   Esto añade latencia
+   No es gratis pasar datos entre procesos
+La fase dominante sigue siendo I/O
+   Descargar 140 páginas no se acelera tanto
+   Tener 5–10 procesos solo aumenta el tráfico de red
+
+Por eso multiprocessing:
+Mejora menos que threads
+Es peor que asyncio
+Varía bastante en tiempos
+Esto es completamente normal.
+
+Speedup vs secuencial (con tus números)
+
+Tus tiempos:
+
+SYNC promedio ≈ 84.53 s
+PROCESS promedio ≈ (63.36 + 68.75 + 57.47) / 3 ≈ 63.19 s
+
+Speedup:
+Speedup = 84.53 / 63.19 ≈ 1.34×
+
+O sea:
+ Los procesos son 34% más rápidos que sync
+ Menos rápidos que threads (~3.3×)
+ Mucho más lentos que async (~8.7×)
+Y esto es exactamente lo esperado.
+
+¿Cómo afecta fork a parsing y descarga?
+
+El uso de multiprocessing.Process crea varios procesos independientes, cada uno con su propio 
+intérprete de Python. Esto elimina las restricciones del GIL, permitiendo que diferentes procesos 
+ejecuten código Python en paralelo real. Por este motivo, la fase de parsing —que es una operación 
+CPU-bound— sí puede beneficiarse del paralelismo y ejecutarse simultáneamente en varios núcleos. 
+Sin embargo, la fase de descarga es I/O-bound y no obtiene una mejora significativa con procesos, 
+ya que la velocidad de red y la latencia del servidor continúan siendo el factor limitante. 
+Además, los procesos tienen un overhead considerable (creación, copia de memoria, comunicación entre procesos), 
+lo cual reduce el beneficio total. Como resultado, los procesos son más rápidos que el modo secuencial, 
+pero ofrecen un speedup limitado y menor que el de hilos o AsyncIO.
+
+AsyncIO (más rápido) < Threads < Procesos < Sync (más lento)
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- Pools vs gestión manual:
+
+[POOL-THREAD] Tiempo total: 23.98 s
+[POOL-THREAD] Top-50 términos globales guardados en results_thread_pool.json
+[POOL-THREAD] Tiempo total: 27.30 s
+[POOL-THREAD] Top-50 términos globales guardados en results_thread_pool.json
+[POOL-THREAD] Tiempo total: 26.50 s
+[POOL-THREAD] Top-50 términos globales guardados en results_thread_pool.json
+
+[POOL-PROC] Tiempo total: 38.18 s
+[POOL-PROC] Top-50 términos globales guardados en results_process_pool.json
+[POOL-PROC] Tiempo total: 45.72 s
+[POOL-PROC] Top-50 términos globales guardados en results_process_pool.json
+[POOL-PROC] Tiempo total: 27.58 s
+[POOL-PROC] Top-50 términos globales guardados en results_process_pool.json
+
+Thread Pool vs Threads manuales
+
+Al comparar la versión con hilos manuales con ThreadPoolExecutor, los tiempos promedio fueron muy similares (≈25 s en ambos casos). 
+Esto se debe a que las operaciones de red son I/O-bound y liberan el GIL, por lo que tanto los hilos manuales como el thread pool 
+pueden solapar varias descargas sin restricciones. La ventaja del thread pool no está en el rendimiento, sino en la simplicidad del 
+código: maneja la creación, reutilización y coordinación de hilos automáticamente, reduciendo errores y haciéndolo más fácil de mantener.
+
+Process Pool vs Processes manuales
+
+En el caso de procesos, la diferencia sí fue significativa: la versión con procesos manuales promedió ≈63.19 s, mientras que el process 
+pool redujo el tiempo a ≈37.16 s. Esto ocurre porque multiprocessing.Process crea un proceso nuevo por URL, lo cual tiene un overhead muy alto, 
+ya que cada proceso implica copiar memoria, inicializar un intérprete y comunicarse mediante pipes. Por el contrario, ProcessPoolExecutor 
+mantiene un conjunto fijo de procesos ya inicializados y distribuye el trabajo entre ellos, reutilizándolos y evitando este overhead. 
+Por ello, el process pool ofrece mejor rendimiento y un código más simple.
+
+¿Qué ventaja de rendimiento y complejidad de código aporta cada tipo de pool?
+🔵 Thread Pool (ThreadPoolExecutor)
+
+Rendimiento:
+El rendimiento es muy parecido al de los hilos manuales en este workload I/O-bound.
+No da un speedup grande extra, pero mantiene el buen rendimiento que ya tienen los threads.
+Complejidad de código:
+Gran ventaja: el código es más corto y limpio.
+No tienes que crear, arrancar ni hacer join() a cada hilo a mano.
+El pool administra la cola de tareas y la reutilización de hilos automáticamente.
+
+Conclusión: poca mejora en rendimiento, gran mejora en simplicidad y mantenibilidad.
+
+🟢 Process Pool (ProcessPoolExecutor / multiprocessing.Pool)
+
+Rendimiento:
+
+Aquí sí hay una mejora clara frente a procesos “a mano”.
+El pool reutiliza un conjunto fijo de procesos y evita crear uno nuevo por URL.
+Eso reduce muchísimo el overhead de fork y da tiempos mucho menores.
+Complejidad de código:
+El código es mucho más simple que gestionar Process manualmente.
+No tienes que coordinar procesos, ni manejar listas compartidas, ni pipes explícitos.
+
+Conclusión: mejor rendimiento y menor complejidad de código comparado con procesos manuales.
+
+pip install memory_profiler
+mprof run python html_fetch_async.py
+mprof peak
+
+import matplotlib.pyplot as plt
+
+workers = [2, 4, 8, 16]
+tiempos = [45.3, 32.3, 26.8, 25.4]       # reemplazar con tus valores
+memoria = [95, 97, 101, 121]            # reemplazar con tus valores
+
+plt.figure(figsize=(8,4))
+
+# --- Grafico de tiempo ---
+plt.subplot(1, 2, 1)
+plt.plot(workers, tiempos, marker='o')
+plt.title('Escalabilidad de Pool (Tiempo)')
+plt.xlabel('Workers')
+plt.ylabel('Tiempo (s)')
+
+# --- Grafico de memoria ---
+plt.subplot(1, 2, 2)
+plt.plot(workers, memoria, marker='o', color='orange')
+plt.title('Escalabilidad de Pool (Memoria)')
+plt.xlabel('Workers')
+plt.ylabel('Memoria (MiB)')
+
+plt.tight_layout()
+plt.savefig('escalabilidad_pool.png')
+plt.show()
+
+¿Qué se espera que observes?
+
+1. Al aumentar los workers, el tiempo mejora al inicio
+Porque hay más tareas ejecutándose en paralelo.
+
+2. Pero llega un punto donde la mejora se detiene → punto óptimo
+Normalmente entre 8 y 12 workers en este tipo de laboratorio.
+
+3. Después de ese punto, agregar más workers NO mejora
+Incluso puede empeorar el tiempo.
+
+4. La memoria crece a medida que aumentan los workers
+Más hilos/procesos = más buffers y estructuras.
+
+5. La razón de que deje de escalar es la contención
+Los workers compiten por:
+  red saturada
+  el GIL en el parsing
+  CPU limitada
+  colas de trabajo del executor
+  contexto del sistema operativo
+
+Punto de rendimiento óptimo y efecto de la contención
+
+Al incrementar el número de workers, el tiempo total mejora inicialmente porque se solapan más tareas en paralelo. 
+Sin embargo, esta mejora solo ocurre hasta un punto óptimo, que típicamente aparece entre 8 y 12 workers. 
+A partir de ese valor, agregar más workers deja de reducir el tiempo e incluso puede empeorarlo. Esto se debe a la contención, 
+es decir, la competencia entre workers por recursos limitados como la red, el GIL durante el parsing, la cola del pool y la CPU. 
+Cuando aumenta la contención, los workers pasan más tiempo bloqueados o esperando turnos, por lo que el rendimiento deja de 
+escalar y la memoria consumida aumenta innecesariamente.
